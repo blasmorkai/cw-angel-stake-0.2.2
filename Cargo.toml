@@ -27,7 +27,12 @@ serde           = { version = "1.0.149", default-features = false, features = ["
 thiserror       = "1.0.31"
 cosmwasm-storage = "1.0.0"
 cw-multi-test = "0.16.1"
+cw-controllers = "1.0.0"
 
+
+[profile.release.package.angel-staking]
+codegen-units = 1
+incremental = false
 
 [profile.release.package.nft]
 codegen-units = 1

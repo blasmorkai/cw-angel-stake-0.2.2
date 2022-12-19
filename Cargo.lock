@@ -14,6 +14,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "angel-staking"
+version = "0.1.0"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw-controllers",
+ "cw-multi-test",
+ "cw-storage-plus 1.0.1",
+ "cw-utils 1.0.0",
+ "cw2 1.0.0",
+ "cw20",
+ "schemars",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -205,6 +223,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cw-controllers"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "343ee0fb235c63a37694b030b48461581d89e119bc37fb4cb456fad90766123b"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-storage-plus 0.16.0",
+ "cw-utils 0.16.0",
+ "schemars",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "cw-multi-test"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -213,7 +246,7 @@ dependencies = [
  "anyhow",
  "cosmwasm-std",
  "cw-storage-plus 0.16.0",
- "cw-utils",
+ "cw-utils 0.16.0",
  "derivative",
  "itertools",
  "k256",
@@ -261,6 +294,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cw-utils"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b50d0cac456f98b4339b78e890fbe60e4dfe888c87abacc1129fc3fe34bbe20a"
+dependencies = [
+ "anyhow",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw2 0.16.0",
+ "k256",
+ "schemars",
+ "semver",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "cw2"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -287,33 +337,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "cw721"
-version = "0.16.0"
+name = "cw20"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94a1ea6e6277bdd6dfc043a9b1380697fe29d6e24b072597439523658d21d791"
+checksum = "a7a4d69a9980e2295077c08fd3f797149658f357167f5898e27c00b9465fcbde"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-utils",
+ "cw-utils 0.16.0",
  "schemars",
  "serde",
-]
-
-[[package]]
-name = "cw721-base"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77518e27431d43214cff4cdfbd788a7508f68d9b1f32389e6fce513e7eaccbef"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-storage-plus 0.16.0",
- "cw-utils",
- "cw2 0.16.0",
- "cw721",
- "schemars",
- "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -520,23 +553,6 @@ name = "libc"
 version = "0.2.138"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db6d7e329c562c5dfab7a46a2afabc8b987ab9a4834c9d1ca04dc54c1546cef8"
-
-[[package]]
-name = "nft"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw-multi-test",
- "cw-storage-plus 1.0.1",
- "cw2 1.0.0",
- "cw721",
- "cw721-base",
- "schemars",
- "serde",
- "thiserror",
-]
 
 [[package]]
 name = "once_cell"
