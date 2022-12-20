@@ -149,7 +149,7 @@ pub fn unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amoun
             deps.storage,
             &Addr::unchecked(nft_id.to_string()),
             vec_address_coin[i].1.amount,
-            cw20::Expiration::AtHeight(20u64),  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            cw20::Expiration::AtHeight(20u64),  // 1) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         )?;
 
     }

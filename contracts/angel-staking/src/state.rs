@@ -57,6 +57,7 @@ pub const CLAIMS: Claims = Claims::new("claims");
 // validator_addr, total_bonded_to_validator
 // pub const VALIDATOR_BOND_AMOUNT: Map<&str, Uint128> = Map::new("validator_bond_amount");
 
+////////////////// BUILDING A MULTIINDEX TO SORT Map<validator_address, validator_total_bonded> by validator_total_bonded
 pub struct ValidatorIndex<'a> {
     pub total_bonded: MultiIndex<'a, u64, u64, &'a str>,
 }
@@ -74,14 +75,14 @@ pub struct State <'a>
     pub validator_bond_amount: IndexedMap<'a, &'a str, u64, ValidatorIndex<'a>>,
 }
 
-// impl<'a> State<'a>
-// {
-//     pub fn new() -> Self {
-//         Self {
-//             validator_bond_amount: IndexedMap::new(
-//                 "bond_pk_namespace",
-//             ValidatorIndex { total_bonded: MultiIndex::new(|_pk,d| d.) }),
-
-//         }
-//     }
-// }
+impl<'a> State<'a>
+{
+    pub fn new() -> Self {
+        Self {
+            validator_bond_amount: IndexedMap::new(
+                "total_bonded",
+            ValidatorIndex { total_bonded: MultiIndex::new(|_pk,d| d.clone(),"totalbonded","total__bonded"),},
+            )
+        }
+    }
+}
