@@ -139,8 +139,8 @@ pub fn unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amoun
         validator_info.total_bonded.checked_sub(vec_address_coin[i].1.amount).unwrap();
         VALIDATOR_INFO.save(deps.storage,&vec_address_coin[i].0,&validator_info)?;
 
-        let expiration= validator_info.unbonding_period.after(&env.block);
-        let expiration_cw20: cw20::Expiration = validator_info.unbonding_period.after(&env.block);
+        // let expiration= validator_info.unbonding_period.after(&env.block);
+        // let expiration_cw20: cw20::Expiration = validator_info.unbonding_period.after(&env.block);
 
         //ERROR: the expiration field from create claim seems to come from cw20 and clashes with cw-utils implementation.
         //ERROR Description: expected enum `cw20::Expiration`, found enum `cw_utils::Expiration`

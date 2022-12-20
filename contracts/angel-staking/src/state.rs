@@ -1,7 +1,7 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Decimal, Uint128, Uint64};
 use cw_controllers::Claims;
-use cw_storage_plus::{Item, Map};
+use cw_storage_plus::{Item, Map, MultiIndex, Index, IndexList, IndexedMap};
 use cw_utils::Duration;
 
 
@@ -32,9 +32,6 @@ pub const VALIDATOR_DEPOSITS: Map<&str, Validator_Deposits> = Map::new("validato
 // validator_addr, validator_info
 pub const VALIDATOR_INFO: Map<&str, Validator_Info> = Map::new("validator_deposits");
 
-// validator_addr, total_bonded_to_validator
-// pub const VALIDATOR_BOND_AMOUNT: Map<&str, Uint128> = Map::new("validator_bond_amount");
-
 //This is the unbonding period of the native staking module
 pub const DENOM_UNBONDING_PERIOD : Map<String, Duration> = Map::new("unbonding_period");
 
@@ -55,3 +52,36 @@ pub const MANAGER: Item<String> = Item::new("manager");
 
 pub const CLAIMS: Claims = Claims::new("claims");
 
+
+
+// validator_addr, total_bonded_to_validator
+// pub const VALIDATOR_BOND_AMOUNT: Map<&str, Uint128> = Map::new("validator_bond_amount");
+
+pub struct ValidatorIndex<'a> {
+    pub total_bonded: MultiIndex<'a, u64, u64, &'a str>,
+}
+
+// This impl seems to be general
+impl<'a> IndexList<u64> for ValidatorIndex<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<u64>> + '_> {
+        let v: Vec<&dyn Index<u64>> = vec![&self.total_bonded];
+        Box::new(v.into_iter())
+    }
+}
+
+pub struct State <'a>
+{
+    pub validator_bond_amount: IndexedMap<'a, &'a str, u64, ValidatorIndex<'a>>,
+}
+
+// impl<'a> State<'a>
+// {
+//     pub fn new() -> Self {
+//         Self {
+//             validator_bond_amount: IndexedMap::new(
+//                 "bond_pk_namespace",
+//             ValidatorIndex { total_bonded: MultiIndex::new(|_pk,d| d.) }),
+
+//         }
+//     }
+// }
