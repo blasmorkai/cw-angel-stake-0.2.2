@@ -86,3 +86,5 @@ impl<'a> State<'a>
         }
     }
 }
+
+//QUESTION: Line 84. Why does d.clone() not be d.total_bonded.clone()
