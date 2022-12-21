@@ -57,22 +57,22 @@ pub const CLAIMS: Claims = Claims::new("claims");
 // validator_addr, total_bonded_to_validator
 // pub const VALIDATOR_BOND_AMOUNT: Map<&str, Uint128> = Map::new("validator_bond_amount");
 
-////////////////// BUILDING A MULTIINDEX TO SORT Map<validator_address, validator_total_bonded> by validator_total_bonded
+// //////////////// BUILDING A MULTIINDEX TO SORT Map<validator_address, validator_total_bonded> by validator_total_bonded
 pub struct ValidatorIndex<'a> {
-    pub total_bonded: MultiIndex<'a, u64, u64, &'a str>,
+    pub total_bonded: MultiIndex<'a, u128, u128, &'a str>,
 }
 
 // This impl seems to be general
-impl<'a> IndexList<u64> for ValidatorIndex<'a> {
-    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<u64>> + '_> {
-        let v: Vec<&dyn Index<u64>> = vec![&self.total_bonded];
+impl<'a> IndexList<u128> for ValidatorIndex<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<u128>> + '_> {
+        let v: Vec<&dyn Index<u128>> = vec![&self.total_bonded];
         Box::new(v.into_iter())
     }
 }
 
 pub struct State <'a>
 {
-    pub validator_bond_amount: IndexedMap<'a, &'a str, u64, ValidatorIndex<'a>>,
+    pub validator_bond_amount: IndexedMap<'a, &'a str, u128, ValidatorIndex<'a>>,
 }
 
 impl<'a> State<'a>
@@ -88,3 +88,49 @@ impl<'a> State<'a>
 }
 
 //QUESTION: Line 84. Why does d.clone() not be d.total_bonded.clone()
+
+
+// //////////////// BUILDING A MULTIINDEX TO SORT Map<validator_address, Validator_Info> by validator_bonded
+
+#[cw_serde]
+pub struct ValidatorInfo{
+    pub address:  String,
+    /// Denomination we can stake
+    pub bond_denom: String,
+    /// unbonding period of the native staking module
+    pub unbonding_period: Duration,
+    pub bonded: u64,
+	    // Needed or not needed, let's see
+	    pub min_withdraw: Uint64,
+}
+
+pub struct ValidatorIndexes<'a> {
+    pub bonded: MultiIndex<'a, u64, ValidatorInfo, &'a str>,
+}
+
+// This impl seems to be general
+impl<'a> IndexList<ValidatorInfo> for ValidatorIndexes<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<ValidatorInfo>> + '_> {
+        let v: Vec<&dyn Index<ValidatorInfo>> = vec![&self.bonded];
+        Box::new(v.into_iter())
+    }
+}
+
+pub struct State2 <'a>
+{
+    pub validator_bond_amount: IndexedMap<'a, &'a str, ValidatorInfo, ValidatorIndexes<'a>>,
+}
+
+impl<'a> State2<'a>
+{
+    pub fn new() -> Self {
+        Self {
+            // pk: primary key -- d: data
+            validator_bond_amount: IndexedMap::new(
+                "bonded_per_validator",
+            ValidatorIndexes { 
+                bonded: MultiIndex::new(|_pk,d| d.bonded.clone(),"validatorinfo","validatorinfo__bonded"),},
+            )
+        }
+    }
+}

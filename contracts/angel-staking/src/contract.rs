@@ -13,7 +13,7 @@ use cw_utils::{one_coin, PaymentError, Duration, Expiration};
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg,  QueryMsg};
-use crate::state::{VALIDATOR_DEPOSITS, VALIDATOR_INFO, TOTAL_BONDED, TOTAL_CLAIMED, AGENT, MANAGER, CLAIMS, Validator_Deposits, Validator_Info };
+use crate::state::{VALIDATOR_DEPOSITS, VALIDATOR_INFO, TOTAL_BONDED, TOTAL_CLAIMED, AGENT, MANAGER, CLAIMS, Validator_Deposits, Validator_Info, State };
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:cw-staking-angel";
@@ -74,15 +74,20 @@ pub fn bond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amount:
     let validator_address = chosen_validator_stake(deps.as_ref())?;
 
     // Update bonded tokens to validator
-    // QUESTION next line: rust analyzer says it does not need to be mutable??
     let mut validator_info = VALIDATOR_INFO.load(deps.storage, &validator_address)?;
     validator_info.total_bonded.checked_add(amount).unwrap();
     VALIDATOR_INFO.save(deps.storage, &validator_address, &validator_info)?;
 
-            // VALIDATOR_INFO.update(deps.storage,&validator_address, |mut val| -> Result<_,ContractError> {
-            //     val.unwrap().total_bonded.checked_add(amount);
-            //     Ok(val.unwrap())
-            // })?;
+
+
+    // Updating IndexedMap - validator_addr, total_bonded_to_validator
+    let state = State::new();
+    state.validator_bond_amount.update(deps.storage,&validator_address.clone(),|bonded| -> StdResult<_> {
+        match bonded {
+            Some(bonded) => Ok(bonded.checked_add(amount.into()).unwrap()),
+            None => Ok(amount.into())
+        }
+    })?;
 
     TOTAL_BONDED.update(deps.storage, |total| -> StdResult<_> {
             Ok(total.checked_add(amount)?)
@@ -239,6 +244,9 @@ pub fn add_validator(deps: DepsMut, env: Env, info: MessageInfo, validator_addre
     };
 
     VALIDATOR_INFO.save(deps.storage, &validator_address, &validator_info)?;
+
+    let state = State::new();
+    state.validator_bond_amount.save(deps.storage,&validator_address.clone(),&0)?;
 
     Ok(Response::default()
     .add_attribute("action", "add_validator")
