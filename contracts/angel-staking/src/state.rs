@@ -5,12 +5,19 @@ use cw_storage_plus::{Item, Map, MultiIndex, Index, IndexList, IndexedMap};
 use cw_utils::Duration;
 
 
-//This is the unbonding period of the native staking module
-pub const DENOM_UNBONDING_PERIOD : Map<String, Duration> = Map::new("unbonding_period");
+//Unbonding period of the native staking module
+// pub const UNBONDING_PERIOD : Map<String, Duration> = Map::new("unbonding_period");
 
-pub const TOTAL_BONDED: Item<Uint128> = Item::new("total_deposits");
+//Denom of the native staking module
+// pub const DENOM : Map<String, Duration> = Map::new("unbonding_period");
 
-pub const TOTAL_CLAIMED: Item<Uint128> = Item::new("total_claims");
+// Currently bonded and claimed
+pub const BONDED: Item<Uint128> = Item::new("bonded");
+pub const CLAIMED: Item<Uint128> = Item::new("claimed");
+
+// All bonded and claimed 
+pub const TOTAL_BONDED: Item<Uint128> = Item::new("total_bonded");
+pub const TOTAL_CLAIMED: Item<Uint128> = Item::new("total_claimed");
 
 pub const NUMBER_VALIDATORS: Item<Uint64> = Item::new("number_validators");
 
