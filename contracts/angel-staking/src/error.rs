@@ -62,4 +62,5 @@ pub enum ContractError {
 
     #[error("Unable to unstake {amount} from {number_validators} validators")]
     UnableUnstakeAmount { amount: Uint128, number_validators: Uint64 },
+    
 }

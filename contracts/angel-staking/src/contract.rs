@@ -3,8 +3,8 @@ use core::num;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    coin, to_binary, Addr, BankMsg, Binary, Decimal, Deps, DepsMut, DistributionMsg, Env,
-    MessageInfo, QuerierWrapper, Response, StakingMsg, StdError, StdResult, Uint128, WasmMsg, Uint64,
+    coin, to_binary, Addr, BankMsg, Binary, Deps, DepsMut, Env,
+    MessageInfo, QuerierWrapper, Response, StakingMsg, StdResult, Uint128, Uint64,
     Order, Coin,
 };
 
@@ -13,7 +13,7 @@ use cw_utils::{one_coin, PaymentError, Duration, Expiration};
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg,  QueryMsg};
-use crate::state::{VALIDATOR_DEPOSITS, VALIDATOR_INFO, TOTAL_BONDED, TOTAL_CLAIMED, AGENT, MANAGER, CLAIMS, Validator_Deposits, Validator_Info, State };
+use crate::state::{BONDED, CLAIMED, TOTAL_BONDED, TOTAL_CLAIMED, AGENT, MANAGER, CLAIMS, State, NUMBER_VALIDATORS, ValidatorInfo };
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:cw-staking-angel";
@@ -34,8 +34,11 @@ pub fn instantiate(
     
     AGENT.save(deps.storage, &msg.agent)?;
     MANAGER.save(deps.storage, &msg.manager)?;
+    BONDED.save(deps.storage, &Uint128::zero())?;
+    CLAIMED.save(deps.storage, &Uint128::zero())?;
     TOTAL_BONDED.save(deps.storage, &Uint128::zero())?;
     TOTAL_CLAIMED.save(deps.storage, &Uint128::zero())?;
+    NUMBER_VALIDATORS.save(deps.storage, &Uint64::zero())?;
 
     Ok(Response::default())   
 }
@@ -48,16 +51,16 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Bond {nft_id, amount} => bond(deps, env, info, nft_id, amount),
+        ExecuteMsg::Bond {nft_id} => bond(deps, env, info, nft_id),
         ExecuteMsg::Unbond { nft_id, amount } => unbond(deps, env, info, nft_id, amount),
-        ExecuteMsg::Claim {nft_id} => claim(deps, env, info, nft_id),
+        ExecuteMsg::Claim {nft_id, sender} => claim(deps, env, info, nft_id, sender),
         ExecuteMsg::AddValidator { address, bond_denom, unbonding_period } => add_validator (deps, env, info, address, bond_denom, unbonding_period),
         ExecuteMsg::RemoveValidator { address } => remove_validator (deps, env, info, address, ),
         ExecuteMsg::BondCheck {} => bond_check(deps.as_ref(), env),
     }
 }
 
-pub fn bond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
+pub fn bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128) -> Result<Response, ContractError> {
     // Making sure there is only one coin and handling the possible errors.
     let d_coins = match one_coin(&info) {
         Ok(coin) => coin,
@@ -74,23 +77,17 @@ pub fn bond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amount:
     let validator_address = chosen_validator_stake(deps.as_ref())?;
 
     // Update bonded tokens to validator
-    let mut validator_info = VALIDATOR_INFO.load(deps.storage, &validator_address)?;
-    validator_info.total_bonded.checked_add(amount).unwrap();
-    VALIDATOR_INFO.save(deps.storage, &validator_address, &validator_info)?;
-
-
-
-    // Updating IndexedMap - validator_addr, total_bonded_to_validator
     let state = State::new();
-    state.validator_bond_amount.update(deps.storage,&validator_address.clone(),|bonded| -> StdResult<_> {
-        match bonded {
-            Some(bonded) => Ok(bonded.checked_add(amount.into()).unwrap()),
-            None => Ok(amount.into())
-        }
+    let mut validator_info = state.validator.load(deps.storage, &validator_address)?;
+    validator_info.bonded.checked_add(amount.u128()).unwrap();
+    state.validator.save(deps.storage, &validator_address, &validator_info)?;
+
+    BONDED.update(deps.storage, |total| -> StdResult<_> {
+            Ok(total.checked_add(amount)?)
     })?;
 
     TOTAL_BONDED.update(deps.storage, |total| -> StdResult<_> {
-            Ok(total.checked_add(amount)?)
+        Ok(total.checked_add(amount)?)
     })?;
 
     let res = Response::new()
@@ -105,10 +102,10 @@ pub fn bond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amount:
     Ok(res)
 }
 
-// TODO: implement some logic on which validator will be staking the tokens
-// Now just returning one whatsoever
+// Returns validator with the least amount of tokens bonded
 pub fn chosen_validator_stake (deps: Deps) -> Result<String, ContractError>  {
-    let validator_result : StdResult<Vec<_>> = VALIDATOR_INFO
+    let state = State::new();
+    let validator_result : StdResult<Vec<_>> = state.validator.idx.bonded
     .range(deps.storage,None,None,Order::Ascending)
     .take(1)
     .collect();
@@ -120,15 +117,16 @@ pub fn chosen_validator_stake (deps: Deps) -> Result<String, ContractError>  {
 }
 
 
-pub fn unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
+pub fn unbond(deps: DepsMut, _env: Env, _info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
 
     // Returns the denomination that can be bonded (if there are multiple native tokens on the chain)
     let can_be_bonded_denom = deps.querier.query_bonded_denom()?;
 
-    // TODO: Before calling this function the number of validators has to calculated. A power of 2 or 5 or combination of them
-    let number_validators=2;
-    let amount_to_split = amount / Uint128::from(number_validators);
-    let vec_address_coin = chosen_validators_unstake(deps.as_ref(), amount, amount_to_split, can_be_bonded_denom, number_validators)?;
+    let total_number_validators = NUMBER_VALIDATORS.load(deps.storage)?;
+    let number_validators= calc_validator_number(total_number_validators, amount)?;
+
+    
+    let vec_address_coin = chosen_validators_unstake(deps.as_ref(), amount, can_be_bonded_denom, number_validators)?;
 
     // Turn Vec<String, Coin> into Vec<StakingMsg>
     let msgs : Vec<StakingMsg> = vec_address_coin
@@ -137,12 +135,14 @@ pub fn unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amoun
     .map(|item| StakingMsg::Undelegate { validator: item.0, amount: item.1 })
     .collect();
 
-
+    let state = State::new();
     for i in 0..vec_address_coin.len()-1 {
         // Remove from the validator info the required amount
-        let mut validator_info = VALIDATOR_INFO.load(deps.storage, &vec_address_coin[i].0)?;
-        validator_info.total_bonded.checked_sub(vec_address_coin[i].1.amount).unwrap();
-        VALIDATOR_INFO.save(deps.storage,&vec_address_coin[i].0,&validator_info)?;
+        let mut validator_info = state.validator.load(deps.storage, &vec_address_coin[i].0)?;
+        validator_info.bonded.checked_sub(vec_address_coin[i].1.amount.u128()).unwrap();
+        state.validator.save(deps.storage,&vec_address_coin[i].0,&validator_info)?;
+    }
+
 
         // let expiration= validator_info.unbonding_period.after(&env.block);
         // let expiration_cw20: cw20::Expiration = validator_info.unbonding_period.after(&env.block);
@@ -150,18 +150,24 @@ pub fn unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amoun
         //ERROR: the expiration field from create claim seems to come from cw20 and clashes with cw-utils implementation.
         //ERROR Description: expected enum `cw20::Expiration`, found enum `cw_utils::Expiration`
         //TODO, Should one claim per validator be created, or just a simple one for everything, outside the loop.
-        CLAIMS.create_claim(
-            deps.storage,
-            &Addr::unchecked(nft_id.to_string()),
-            vec_address_coin[i].1.amount,
-            cw20::Expiration::AtHeight(20u64),  // 1) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        )?;
+    CLAIMS.create_claim(
+        deps.storage,
+        &Addr::unchecked(nft_id.to_string()),
+        amount,
+        cw20::Expiration::AtHeight(20u64),  // 1) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    )?;
 
-    }
-
-    TOTAL_BONDED.update(deps.storage, |total| -> StdResult<_> {
+    BONDED.update(deps.storage, |total| -> StdResult<_> {
         Ok(total.checked_sub(amount)?)
     })?;   
+
+    CLAIMED.update(deps.storage, |total| -> StdResult<_> {
+        Ok(total.checked_add(amount)?)
+    })?;  
+    
+    TOTAL_CLAIMED.update(deps.storage, |total| -> StdResult<_> {
+        Ok(total.checked_add(amount)?)
+    })?;  
 
     let res = Response::new()
         .add_messages(msgs)
@@ -172,24 +178,70 @@ pub fn unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amoun
 }
 
 
-// It returns a vector with (validator_address, Coin) .
+// It returns a vector with (validator_address, Coin) with information about the unstake about to happen. 
+// PLAN_A: amount is split between the first 'number_validator' with more coin 'bonded'....
+// PLAN_B: validators ordered Descending by bonded. Start unbonding all the coins from the first until we get 'amount'
 // Confirms that the sum of the split_amount from selected validators is equal to amount
-pub fn chosen_validators_unstake (deps: Deps, amount:Uint128, amount_to_split:Uint128, denom:String, number_validators: u64) -> Result<Vec<(String, Coin)>, ContractError>  {
+pub fn chosen_validators_unstake (deps: Deps, amount:Uint128, denom:String, number_validators: u64) -> Result<Vec<(String, Coin)>, ContractError>  {
     let limit = number_validators as usize;
-
+    let amount_to_split = amount / Uint128::from(number_validators);
+    let state = State::new();
+    
     // Validators/Coin(amount, denom) from which we are going to unstake as vector<addr,Coin>
-    let validator_result : StdResult<Vec<(String, Coin)>> = VALIDATOR_INFO
-    .range(deps.storage,None,None,Order::Ascending)
+    let plana_validator_result : StdResult<Vec<(String, Coin)>> = state.validator.idx.bonded
+    .range(deps.storage,None,None,Order::Descending)
     .filter(|item| 
-        item.as_ref().unwrap().1.total_bonded > amount_to_split && item.as_ref().unwrap().1.bond_denom == denom)
+        item.as_ref().unwrap().1.bonded > amount_to_split.u128() && item.as_ref().unwrap().1.bond_denom == denom)
     .map(|item|
         Ok((item.unwrap().0, coin(amount_to_split.u128(), &denom))))
     .take(limit)
     .collect();
 
-    // Sum of all amounts from previous vector
-    let sum : u128 = validator_result.as_ref()
-    .unwrap()
+    let count = plana_validator_result.as_ref().unwrap().len();
+
+    let vec_address_coin:Vec<(String, Coin)> = if count != limit {
+        let all_validators : StdResult<Vec<(String, Coin)>> = state.validator.idx.bonded
+        .range(deps.storage,None,None,Order::Descending)
+        .map(|item|
+                Ok((item.unwrap().0, coin(amount_to_split.u128(), &denom)))
+            )
+        .collect();
+
+        let vec_all_validators = all_validators?;
+
+        let mut remaining_amount = amount.clone();
+        let total_number_validators = vec_all_validators.len();
+        let total_number_validators_u64 = total_number_validators as u64;
+        let mut i = 0;
+        let mut vec_planb_validator : Vec<(String, Coin)> = vec![];
+
+        while remaining_amount > Uint128::zero() {
+
+            if i > total_number_validators - 1 {
+                return Err(ContractError::UnableUnstakeAmount {
+                    amount: amount, number_validators: Uint64::from(total_number_validators_u64)
+                });
+            }
+
+            let address = &vec_all_validators[i].0;
+            let denom = &vec_all_validators[i].1.denom;
+            let validator_amount = &vec_all_validators[i].1.amount.u128();
+
+            if remaining_amount > vec_all_validators[i].1.amount {
+                vec_planb_validator.push((address.to_string(),coin(*validator_amount, denom)));
+                remaining_amount = remaining_amount - vec_all_validators[i].1.amount;
+                i +=1;
+            } else {
+                vec_planb_validator.push((address.to_string(),coin(remaining_amount.u128(), denom)));
+                break;
+            }
+        }
+        vec_planb_validator
+    } else {
+        plana_validator_result?
+    };
+
+    let sum : u128 = vec_address_coin
     .iter()
     .map(|item| item.1.amount.u128())
     .sum();
@@ -201,17 +253,66 @@ pub fn chosen_validators_unstake (deps: Deps, amount:Uint128, amount_to_split:Ui
         });
     }
 
-    let vec_address_coin:Vec<(String, Coin)> = validator_result?;
-
-
      Ok(vec_address_coin)
 }
 
-pub fn claim(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128) -> Result<Response, ContractError> {
-    unimplemented!()
+
+// Calculates how many validators are going to be unstaken from. 
+// At least one token has to be unstaked per validator 
+pub fn calc_validator_number(number_validators: Uint64, amount: Uint128) -> StdResult<u64> {
+    // Possible number of validators to split the bond is defined by the next vector. 
+    // Powers of two, five or product of both to avoid repeating decimals on the amount to split between validators
+    let v = vec![1, 2, 4, 5, 8, 10];  // 16, 20, 25, 32, 40, 50, 64, 80, 100
+
+    let mut i = v.len();
+    while i>1 {
+        // At least one token to unbond per validator
+        if v[i] <= number_validators.u64() && amount > Uint128::from(number_validators){
+            return Ok(v[i]);
+        }
+        i= i.checked_sub(1).unwrap();
+    }
+
+    Ok(1)
 }
 
-pub fn add_validator(deps: DepsMut, env: Env, info: MessageInfo, validator_address: String, bond_denom: String, unbonding_period: Duration) -> Result<Response, ContractError> {
+pub fn claim(deps: DepsMut, env: Env, _info: MessageInfo, nft_id: Uint128, sender: String) -> Result<Response, ContractError> {
+    let sender = deps.api.addr_validate(&sender)?;
+    let can_be_bonded_denom = deps.querier.query_bonded_denom()?;
+    let mut balance = deps
+        .querier
+        .query_balance(&env.contract.address, &can_be_bonded_denom)?;
+
+    let to_send =
+        CLAIMS.claim_tokens(deps.storage, &Addr::unchecked(nft_id), &env.block, None)?;
+
+    if to_send == Uint128::zero() {
+        return Err(ContractError::NothingToClaim {});
+    }
+
+    if balance.amount < to_send {
+        return Err(ContractError::BalanceTooSmall {});
+    }
+
+    CLAIMED.update(deps.storage, |total| -> StdResult<_> {
+        Ok(total.checked_sub(to_send)?)
+    })?;  
+
+    // transfer tokens to the sender
+    balance.amount = to_send;
+    let res = Response::new()
+        .add_message(BankMsg::Send {
+            to_address: sender.to_string(),
+            amount: vec![balance],
+        })
+        .add_attribute("action", "claim")
+        .add_attribute("from", sender)
+        .add_attribute("nft_id", nft_id.to_string())
+        .add_attribute("amount", to_send);
+    Ok(res)
+}
+
+pub fn add_validator(deps: DepsMut, _env: Env, _info: MessageInfo, validator_address: String, bond_denom: String, unbonding_period: Duration) -> Result<Response, ContractError> {
     // ensure the validator is registered
     let vals = deps.querier.query_all_validators()?;
     if !vals.iter().any(|v| v.address == validator_address) {
@@ -220,7 +321,8 @@ pub fn add_validator(deps: DepsMut, env: Env, info: MessageInfo, validator_addre
         });
     }
 
-    if VALIDATOR_INFO.has(deps.storage, &validator_address) {
+    let state = State::new();
+    if state.validator.has(deps.storage, &validator_address) {
         return Err(ContractError::ValidatorAlreadyRegistered{
             validator: validator_address,
         });
@@ -235,18 +337,18 @@ pub fn add_validator(deps: DepsMut, env: Env, info: MessageInfo, validator_addre
         });
     }
 
-    let validator_info = Validator_Info{ 
-        address: validator_address.clone(), 
+    let validator_info = ValidatorInfo{ 
         bond_denom, 
         unbonding_period,
-        total_bonded: Uint128::zero(),
-        min_withdraw: Uint64::from(1u32),
+        bonded: 0u128,
+        claimed: 0u128,
     };
 
-    VALIDATOR_INFO.save(deps.storage, &validator_address, &validator_info)?;
+    state.validator.save(deps.storage, &validator_address, &validator_info)?;
 
-    let state = State::new();
-    state.validator_bond_amount.save(deps.storage,&validator_address.clone(),&0)?;
+    NUMBER_VALIDATORS.update(deps.storage, |total| -> StdResult<_> {
+        Ok(total.checked_add(Uint64::from(1u64))?)
+    })?;
 
     Ok(Response::default()
     .add_attribute("action", "add_validator")
@@ -264,7 +366,7 @@ pub fn bond_check (deps: Deps, env:Env) -> Result<Response, ContractError>{
     // Expecting all delegations to be of the same denom
     let total_bonded = get_all_bonded(&deps.querier, &env.contract.address)?;
 
-    let state_total_bonded = TOTAL_BONDED.load(deps.storage)?;
+    let state_total_bonded = BONDED.load(deps.storage)?;
     if total_bonded != state_total_bonded {
         return Err(ContractError::BondedDiffer {
             total_bonded: total_bonded, state_total_bonded: state_total_bonded
@@ -294,8 +396,33 @@ fn get_all_bonded(querier: &QuerierWrapper, contract: &Addr) -> Result<Uint128, 
     })
 }
 
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    let state = State::new();
+    match msg {
+        // Returns #[returns(ClaimsResponse)]
+        QueryMsg::Claims { nft_id } => {to_binary(&CLAIMS.query_claims(deps, &Addr::unchecked(nft_id))?)},
+        // [returns(Validator_Info)]
+        QueryMsg::ValidatorInfo {address} => to_binary(&state.validator.load(deps.storage,&address)?),
+        // [returns(Validator_Deposits)]
+        QueryMsg::TotalBonded {} => to_binary(&TOTAL_BONDED.may_load(deps.storage)?.unwrap_or_default()),
+        QueryMsg::TotalClaimed{} => to_binary(&TOTAL_CLAIMED.may_load(deps.storage)?.unwrap_or_default()),
+        QueryMsg::ContractBonded {} => to_binary(&BONDED.may_load(deps.storage)?.unwrap_or_default()),
+        QueryMsg::ContractClaimed{} => to_binary(&CLAIMED.may_load(deps.storage)?.unwrap_or_default()),
+        QueryMsg::BondedOnValidator{address} => to_binary(&query_bonded_on_validator(deps, env, address)?),
+        QueryMsg::Agent{} => to_binary(&AGENT.load(deps.storage)?),
+        QueryMsg::Manager{} => to_binary(&MANAGER.load(deps.storage)?),
+    }
+}
+
+pub fn query_bonded_on_validator(deps: Deps, env: Env,  val_address:String) -> StdResult<Uint128> {
+     let bonded = bonded_on_validator(&deps.querier, &env.contract.address, &deps.api.addr_validate(&val_address)?).unwrap();
+    Ok(bonded)
+}
+
 // get_bonded returns the total amount of delegations from contract to a certain validator
-fn get_bonded(querier: &QuerierWrapper, delegator: &Addr, validator: &Addr) -> Result<Uint128, ContractError> {
+// Not in use at the moment.
+fn bonded_on_validator(querier: &QuerierWrapper, delegator: &Addr, validator: &Addr) -> Result<Uint128, ContractError> {
     let option_full_delegation = querier.query_delegation(delegator,validator)?;
     if option_full_delegation.is_none() {
         return Ok(Uint128::zero());
@@ -305,23 +432,6 @@ fn get_bonded(querier: &QuerierWrapper, delegator: &Addr, validator: &Addr) -> R
     let amount = full_delegation.amount.amount;
 
     Ok(Uint128::from(amount))
-}
-
-
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
-    match msg {
-        // Returns #[returns(ClaimsResponse)]
-        QueryMsg::Claims { nft_id } => {to_binary(&CLAIMS.query_claims(deps, &deps.api.addr_validate(&nft_id)?)?)},
-        // [returns(Validator_Info)]
-        QueryMsg::ValidatorInfo {address} => to_binary(&VALIDATOR_INFO.load(deps.storage,&address)?),
-        // [returns(Validator_Deposits)]
-        QueryMsg::ValidatorDeposits {address} => to_binary(&VALIDATOR_DEPOSITS.load(deps.storage,&address)?),
-        QueryMsg::TotalBonded {} => to_binary(&TOTAL_BONDED.may_load(deps.storage)?.unwrap_or_default()),
-        QueryMsg::TotalClaimed{} => to_binary(&TOTAL_CLAIMED.may_load(deps.storage)?.unwrap_or_default()),
-        QueryMsg::Agent{} => to_binary(&AGENT.load(deps.storage)?),
-        QueryMsg::Manager{} => to_binary(&MANAGER.load(deps.storage)?),
-    }
 }
 
 
