@@ -53,23 +53,23 @@ mod tests {
         (app, code_id_nft)
     }
 
-    pub fn cw721_instantiate(app: &mut App, code_id: u64, name: String, symbol: String, minter: String,) -> NftContract {
-        let contract = app
-            .instantiate_contract(
-                code_id,
-                Addr::unchecked(ADMIN),
-                &cw721_base::InstantiateMsg {                   
-                    name,
-                    symbol,
-                    minter,
-                },
-                &[],
-                "nft",
-                None,
-            )
-            .unwrap();
-        NftContract(contract)
-    }
+    // pub fn cw721_instantiate(app: &mut App, code_id: u64, name: String, symbol: String, minter: String,) -> NftContract {
+    //     let contract = app
+    //         .instantiate_contract(
+    //             code_id,
+    //             Addr::unchecked(ADMIN),
+    //             &cw721_base::InstantiateMsg {                   
+    //                 name,
+    //                 symbol,
+    //                 minter,
+    //             },
+    //             &[],
+    //             "nft",
+    //             None,
+    //         )
+    //         .unwrap();
+    //     NftContract(contract)
+    // }
 
     // let mint_msg = MintMsg {
     //     token_id: token_id.to_string(),
