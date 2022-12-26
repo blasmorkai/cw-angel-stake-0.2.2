@@ -62,5 +62,10 @@ pub enum ContractError {
 
     #[error("Unable to unstake {amount} from {number_validators} validators")]
     UnableUnstakeAmount { amount: Uint128, number_validators: Uint64 },
-    
+ 
+    #[error("Validator {address} not registered")]
+    NotRegisteredValidator { address: String },
+
+    #[error("Custom Error val: {val:?}")]
+    CustomError { val: String },
 }

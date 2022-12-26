@@ -57,6 +57,7 @@ pub fn execute(
         ExecuteMsg::AddValidator { address, bond_denom, unbonding_period } => add_validator (deps, env, info, address, bond_denom, unbonding_period),
         ExecuteMsg::RemoveValidator { address } => remove_validator (deps, env, info, address, ),
         ExecuteMsg::BondCheck {} => bond_check(deps.as_ref(), env),
+        ExecuteMsg::TransferAngelRewards {  } => unimplemented!(),
     }
 }
 
@@ -74,7 +75,7 @@ pub fn bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128) -> Res
     };
     let amount = d_coins.amount;
 
-    let validator_address = chosen_validator_stake(deps.as_ref())?;
+    let validator_address = chosen_validator(deps.as_ref(), None)?;
 
     // Update bonded tokens to validator
     let state = State::new();
@@ -102,13 +103,25 @@ pub fn bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128) -> Res
     Ok(res)
 }
 
+
 // Returns validator with the least amount of tokens bonded
-pub fn chosen_validator_stake (deps: Deps) -> Result<String, ContractError>  {
+// excluded address can not be returned 
+pub fn chosen_validator (deps: Deps, excluded_address: Option<String>) -> Result<String, ContractError>  {
     let state = State::new();
-    let validator_result : StdResult<Vec<_>> = state.validator.idx.bonded
-    .range(deps.storage,None,None,Order::Ascending)
-    .take(1)
-    .collect();
+    let validator_result : StdResult<Vec<_>>;
+    if excluded_address.is_none() {
+        validator_result = state.validator.idx.bonded
+        .range(deps.storage,None,None,Order::Ascending)
+        .take(1)
+        .collect();
+    } else {
+        let excluded_address = excluded_address.unwrap();
+        validator_result = state.validator.idx.bonded
+        .range(deps.storage,None,None,Order::Ascending)
+        .filter(|item| item.as_ref().unwrap().0 != excluded_address)
+        .take(1)
+        .collect();
+    }
 
     let vec_validator_address = validator_result?;
     let validator_address = &vec_validator_address[0].0;
@@ -355,9 +368,49 @@ pub fn add_validator(deps: DepsMut, _env: Env, _info: MessageInfo, validator_add
     .add_attribute("validator_address", validator_address))
 }
 
+// Removes a validator. If it has got tokens staked, it redelegates them. If it has not delegated tokens, just removes it from state.
+pub fn remove_validator(deps: DepsMut, env: Env, _info: MessageInfo, src_validator_address: String) -> Result<Response, ContractError> {
+    let state = State::new();
 
-pub fn remove_validator(deps: DepsMut, env: Env, info: MessageInfo, address: String) -> Result<Response, ContractError> {
-    unimplemented!()
+    if !state.validator.has(deps.storage, &src_validator_address) {
+        return Err(ContractError::NotRegisteredValidator { address:src_validator_address });
+    }
+
+     let validator_count : u128 = state.validator.idx.bonded
+    .range(deps.storage, None, None, Order::Descending)
+    .into_iter()
+    .count().try_into().unwrap();
+
+    let option_full_delegation = deps.querier.query_delegation(env.contract.address,src_validator_address.clone())?;
+    // What if the chosen validator is the one we are trying to remove??
+    let dst_validator_address = chosen_validator(deps.as_ref(), Some(src_validator_address.clone()))?;
+
+    state.validator.remove(deps.storage, &src_validator_address)?;
+    let res:Response;
+    if option_full_delegation.is_some() && validator_count ==1 {
+        return Err(ContractError::CustomError { val: "Only one validator registered. Its delegations can not be redelegated".to_string() })
+    } else if option_full_delegation.is_some(){
+        let amount = option_full_delegation.unwrap().amount;
+        // When we redelegate, by default all the pending rewards are claimed.
+        let msg = StakingMsg::Redelegate { 
+            src_validator:src_validator_address.to_string(), 
+            dst_validator: dst_validator_address.clone(), 
+            amount: amount.clone() 
+        };
+
+        res = Response::new()
+        .add_message(msg)
+        .add_attribute("action", "remove_validator")
+        .add_attribute("address",src_validator_address)
+        .add_attribute("redelegated_validator", dst_validator_address)
+        .add_attribute("redelegated_denom", amount.denom)
+        .add_attribute("redelegated_amount", amount.amount);
+    } else {
+        res = Response::new()
+        .add_attribute("action", "remove_validator")
+        .add_attribute("address",src_validator_address)
+    }
+     Ok(res)
 }
 
 // Check if chain delegated tokens by this contract match the value registered in TOTAL_BONDED state
@@ -412,6 +465,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::BondedOnValidator{address} => to_binary(&query_bonded_on_validator(deps, env, address)?),
         QueryMsg::Agent{} => to_binary(&AGENT.load(deps.storage)?),
         QueryMsg::Manager{} => to_binary(&MANAGER.load(deps.storage)?),
+        QueryMsg::RewardsBalance {  } => to_binary(&deps.querier.query_balance(&env.contract.address, deps.querier.query_bonded_denom()?)?),
     }
 }
 

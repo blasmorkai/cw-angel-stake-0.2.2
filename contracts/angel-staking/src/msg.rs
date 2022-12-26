@@ -1,6 +1,6 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 
-use cosmwasm_std::{Uint128};
+use cosmwasm_std::{Uint128, Coin};
 pub use cw_controllers::ClaimsResponse;
 use cw_utils::Duration;
 use crate::state::{ValidatorInfo};
@@ -26,6 +26,7 @@ pub enum ExecuteMsg {
     AddValidator {address: String, bond_denom: String, unbonding_period: Duration},
     RemoveValidator {address: String},
     BondCheck {},
+    TransferAngelRewards {},
 }
 
 
@@ -51,7 +52,9 @@ pub enum QueryMsg {
     #[returns(String)]
     Agent {},   
     #[returns(String)]
-    Manager {},       
+    Manager {},
+    #[returns(Coin)]
+    RewardsBalance {},       
 }
 
 
