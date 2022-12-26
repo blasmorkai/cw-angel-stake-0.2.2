@@ -21,11 +21,11 @@ pub const TOTAL_CLAIMED: Item<Uint128> = Item::new("total_claimed");
 
 pub const NUMBER_VALIDATORS: Item<Uint64> = Item::new("number_validators");
 
-// Agent Addr
+// Addresses
 pub const AGENT: Item<String> = Item::new("relayer");
-
-// Angel Manager Addr
 pub const MANAGER: Item<String> = Item::new("manager");
+pub const TREASURY: Item<String> = Item::new("manager");
+
 
 
 // Claims(Map<&Addr, Vec<Claim>>)      struct Claim {amount: Uint128,release_at: Expiration,}

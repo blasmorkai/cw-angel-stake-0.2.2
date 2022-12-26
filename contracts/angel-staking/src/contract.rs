@@ -5,7 +5,7 @@ use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     coin, to_binary, Addr, BankMsg, Binary, Deps, DepsMut, Env,
     MessageInfo, QuerierWrapper, Response, StakingMsg, StdResult, Uint128, Uint64,
-    Order, Coin,
+    Order, Coin, DistributionMsg, CosmosMsg,
 };
 
 use cw2::set_contract_version;
@@ -13,7 +13,7 @@ use cw_utils::{one_coin, PaymentError, Duration, Expiration};
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg,  QueryMsg};
-use crate::state::{BONDED, CLAIMED, TOTAL_BONDED, TOTAL_CLAIMED, AGENT, MANAGER, CLAIMS, State, NUMBER_VALIDATORS, ValidatorInfo };
+use crate::state::{BONDED, CLAIMED, TOTAL_BONDED, TOTAL_CLAIMED, AGENT, MANAGER, CLAIMS, State, NUMBER_VALIDATORS, ValidatorInfo, TREASURY };
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:cw-staking-angel";
@@ -31,9 +31,11 @@ pub fn instantiate(
 
     deps.api.addr_validate(&msg.manager)?;
     deps.api.addr_validate(&msg.agent)?;
+    deps.api.addr_validate(&msg.treasury)?;
     
     AGENT.save(deps.storage, &msg.agent)?;
     MANAGER.save(deps.storage, &msg.manager)?;
+    TREASURY.save(deps.storage, &msg.treasury)?;
     BONDED.save(deps.storage, &Uint128::zero())?;
     CLAIMED.save(deps.storage, &Uint128::zero())?;
     TOTAL_BONDED.save(deps.storage, &Uint128::zero())?;
@@ -51,17 +53,22 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Bond {nft_id} => bond(deps, env, info, nft_id),
-        ExecuteMsg::Unbond { nft_id, amount } => unbond(deps, env, info, nft_id, amount),
-        ExecuteMsg::Claim {nft_id, sender} => claim(deps, env, info, nft_id, sender),
-        ExecuteMsg::AddValidator { address, bond_denom, unbonding_period } => add_validator (deps, env, info, address, bond_denom, unbonding_period),
-        ExecuteMsg::RemoveValidator { address } => remove_validator (deps, env, info, address, ),
-        ExecuteMsg::BondCheck {} => bond_check(deps.as_ref(), env),
-        ExecuteMsg::TransferAngelRewards {  } => unimplemented!(),
+        ExecuteMsg::Bond {nft_id} => execute_bond(deps, env, info, nft_id),
+        ExecuteMsg::Unbond { nft_id, amount } => execute_unbond(deps, env, info, nft_id, amount),
+        ExecuteMsg::Claim {nft_id, sender} => execute_claim(deps, env, info, nft_id, sender),
+        ExecuteMsg::AddValidator { address, bond_denom, unbonding_period } => execute_add_validator (deps, env, info, address, bond_denom, unbonding_period),
+        ExecuteMsg::RemoveValidator { address } => execute_remove_validator (deps, env, info, address, ),
+        ExecuteMsg::BondCheck {} => execute_bond_check(deps.as_ref(), env, info),
+        ExecuteMsg::CollectAngelRewards {  } => execute_collect_rewards(deps, env, info),
+        ExecuteMsg::TransferBalanceToTreasury{  } => execute_transfer_balance(deps, env, info),
     }
 }
 
-pub fn bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128) -> Result<Response, ContractError> {
+pub fn execute_bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128) -> Result<Response, ContractError> {
+    let agent = AGENT.load(deps.storage)?;
+    if info.sender != agent {
+        return Err(ContractError::Unauthorized {});
+    }
     // Making sure there is only one coin and handling the possible errors.
     let d_coins = match one_coin(&info) {
         Ok(coin) => coin,
@@ -130,8 +137,11 @@ pub fn chosen_validator (deps: Deps, excluded_address: Option<String>) -> Result
 }
 
 
-pub fn unbond(deps: DepsMut, _env: Env, _info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
-
+pub fn execute_unbond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
+    let agent = AGENT.load(deps.storage)?;
+    if info.sender != agent {
+        return Err(ContractError::Unauthorized {});
+    }
     // Returns the denomination that can be bonded (if there are multiple native tokens on the chain)
     let can_be_bonded_denom = deps.querier.query_bonded_denom()?;
 
@@ -289,7 +299,12 @@ pub fn calc_validator_number(number_validators: Uint64, amount: Uint128) -> StdR
     Ok(1)
 }
 
-pub fn claim(deps: DepsMut, env: Env, _info: MessageInfo, nft_id: Uint128, sender: String) -> Result<Response, ContractError> {
+pub fn execute_claim(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, sender: String) -> Result<Response, ContractError> {
+    let agent = AGENT.load(deps.storage)?;
+    if info.sender != agent {
+        return Err(ContractError::Unauthorized {});
+    }
+
     let sender = deps.api.addr_validate(&sender)?;
     let can_be_bonded_denom = deps.querier.query_bonded_denom()?;
     let mut balance = deps
@@ -325,7 +340,11 @@ pub fn claim(deps: DepsMut, env: Env, _info: MessageInfo, nft_id: Uint128, sende
     Ok(res)
 }
 
-pub fn add_validator(deps: DepsMut, _env: Env, _info: MessageInfo, validator_address: String, bond_denom: String, unbonding_period: Duration) -> Result<Response, ContractError> {
+pub fn execute_add_validator(deps: DepsMut, _env: Env, info: MessageInfo, validator_address: String, bond_denom: String, unbonding_period: Duration) -> Result<Response, ContractError> {
+    let manager = MANAGER.load(deps.storage)?;
+    if info.sender != manager {
+        return Err(ContractError::Unauthorized {});
+    }
     // ensure the validator is registered
     let vals = deps.querier.query_all_validators()?;
     if !vals.iter().any(|v| v.address == validator_address) {
@@ -369,7 +388,12 @@ pub fn add_validator(deps: DepsMut, _env: Env, _info: MessageInfo, validator_add
 }
 
 // Removes a validator. If it has got tokens staked, it redelegates them. If it has not delegated tokens, just removes it from state.
-pub fn remove_validator(deps: DepsMut, env: Env, _info: MessageInfo, src_validator_address: String) -> Result<Response, ContractError> {
+pub fn execute_remove_validator(deps: DepsMut, env: Env, info: MessageInfo, src_validator_address: String) -> Result<Response, ContractError> {
+    let manager = MANAGER.load(deps.storage)?;
+    if info.sender != manager {
+        return Err(ContractError::Unauthorized {});
+    }
+
     let state = State::new();
 
     if !state.validator.has(deps.storage, &src_validator_address) {
@@ -414,7 +438,12 @@ pub fn remove_validator(deps: DepsMut, env: Env, _info: MessageInfo, src_validat
 }
 
 // Check if chain delegated tokens by this contract match the value registered in TOTAL_BONDED state
-pub fn bond_check (deps: Deps, env:Env) -> Result<Response, ContractError>{
+pub fn execute_bond_check (deps: Deps, env:Env, info: MessageInfo) -> Result<Response, ContractError>{
+    let manager = MANAGER.load(deps.storage)?;
+    if info.sender != manager {
+        return Err(ContractError::Unauthorized {});
+    }
+
     // total number of tokensdelegated from this address
     // Expecting all delegations to be of the same denom
     let total_bonded = get_all_bonded(&deps.querier, &env.contract.address)?;
@@ -447,6 +476,54 @@ fn get_all_bonded(querier: &QuerierWrapper, contract: &Addr) -> Result<Uint128, 
             Ok(acc + d.amount.amount)
         }
     })
+}
+
+// Collect pending rewards from all validators
+fn execute_collect_rewards ( deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError>{
+    let manager = MANAGER.load(deps.storage)?;
+    if info.sender != manager {
+        return Err(ContractError::Unauthorized {});
+    }
+    // Any validator rewards have been previosly and automatically claimed when 'bonded change' occurred on any registered validator
+    let state = State::new();
+    let msgs : StdResult<Vec<DistributionMsg>> = state.validator.idx
+        .bonded
+        .range(deps.storage,None, None, Order::Descending)
+        .filter(|item|
+            item.as_ref().unwrap().1.bonded > 0)
+        .map(|item| 
+            Ok(DistributionMsg::WithdrawDelegatorReward { validator: item.unwrap().0 }))
+        .collect();
+
+    let msgs = msgs?;
+    let res = Response::new()
+        .add_messages(msgs)
+        .add_attribute("action", "withdraw_delegation_rewards");
+    Ok(res)
+}
+
+fn execute_transfer_balance (deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError>{
+    let manager = MANAGER.load(deps.storage)?;
+    if info.sender != manager {
+        return Err(ContractError::Unauthorized {});
+    }
+    let balance = deps.querier.query_balance(&env.contract.address, deps.querier.query_bonded_denom()?)?;
+
+    if balance.amount == Uint128::zero() {
+        return Err(ContractError::CustomError { val: "Nothing to transfer. Amount for bonded denom is zero".to_string() })
+    }
+
+    let address = TREASURY.load(deps.storage)?;
+    let msg = BankMsg::Send { to_address: address.clone(), amount: vec![balance.clone()] };
+
+    Ok(Response::new()
+    .add_message(CosmosMsg::Bank(msg))
+    .add_attribute("action", "transfer_balance")
+    .add_attribute("dst_addr", address)
+    .add_attribute("denom", balance.denom)
+    .add_attribute("amount", balance.amount)
+    )
+
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
