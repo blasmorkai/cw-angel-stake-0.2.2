@@ -1,6 +1,5 @@
-use core::num;
 
-#[cfg(not(feature = "library"))]
+// #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     coin, to_binary, Addr, BankMsg, Binary, Deps, DepsMut, Env,
@@ -137,7 +136,7 @@ pub fn chosen_validator (deps: Deps, excluded_address: Option<String>) -> Result
 }
 
 
-pub fn execute_unbond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
+pub fn execute_unbond(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128, amount: Uint128) -> Result<Response, ContractError> {
     let agent = AGENT.load(deps.storage)?;
     if info.sender != agent {
         return Err(ContractError::Unauthorized {});
@@ -147,7 +146,6 @@ pub fn execute_unbond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint1
 
     let total_number_validators = NUMBER_VALIDATORS.load(deps.storage)?;
     let number_validators= calc_validator_number(total_number_validators, amount)?;
-
     
     let vec_address_coin = chosen_validators_unstake(deps.as_ref(), amount, can_be_bonded_denom, number_validators)?;
 
@@ -164,21 +162,23 @@ pub fn execute_unbond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint1
         let mut validator_info = state.validator.load(deps.storage, &vec_address_coin[i].0)?;
         validator_info.bonded.checked_sub(vec_address_coin[i].1.amount.u128()).unwrap();
         state.validator.save(deps.storage,&vec_address_coin[i].0,&validator_info)?;
+
+        CLAIMS.create_claim(
+            deps.storage,
+            &Addr::unchecked(nft_id.to_string()),
+            vec_address_coin[i].1.amount,
+            validator_info.unbonding_period.after(&env.block),  
+        )?;
     }
 
+    // If all validators have got the same unbonding_period. One single entry to CLAIMS could be done
+    // CLAIMS.create_claim(
+    //     deps.storage,
+    //     &Addr::unchecked(nft_id.to_string()),
+    //     amount,
+    //     unbonding_period.after(&env.block),  
+    // )?;
 
-        // let expiration= validator_info.unbonding_period.after(&env.block);
-        // let expiration_cw20: cw20::Expiration = validator_info.unbonding_period.after(&env.block);
-
-        //ERROR: the expiration field from create claim seems to come from cw20 and clashes with cw-utils implementation.
-        //ERROR Description: expected enum `cw20::Expiration`, found enum `cw_utils::Expiration`
-        //TODO, Should one claim per validator be created, or just a simple one for everything, outside the loop.
-    CLAIMS.create_claim(
-        deps.storage,
-        &Addr::unchecked(nft_id.to_string()),
-        amount,
-        cw20::Expiration::AtHeight(20u64),  // 1) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    )?;
 
     BONDED.update(deps.storage, |total| -> StdResult<_> {
         Ok(total.checked_sub(amount)?)
@@ -269,7 +269,7 @@ pub fn chosen_validators_unstake (deps: Deps, amount:Uint128, denom:String, numb
     .map(|item| item.1.amount.u128())
     .sum();
 
-    // Confirm the vector takes account exactly of the amount required
+    // Confirm the vector takes into account exactly the amount required
     if sum != amount.u128() {
         return Err(ContractError::UnableUnstakeAmount {
             amount: amount, number_validators: Uint64::from(number_validators)
@@ -479,7 +479,7 @@ fn get_all_bonded(querier: &QuerierWrapper, contract: &Addr) -> Result<Uint128, 
 }
 
 // Collect pending rewards from all validators
-fn execute_collect_rewards ( deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError>{
+fn execute_collect_rewards ( deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError>{
     let manager = MANAGER.load(deps.storage)?;
     if info.sender != manager {
         return Err(ContractError::Unauthorized {});
@@ -565,28 +565,111 @@ fn bonded_on_validator(querier: &QuerierWrapper, delegator: &Addr, validator: &A
     Ok(Uint128::from(amount))
 }
 
-
+// *****************************************************************************************************************************
+// *****************************************************************************************************************************
+// *****************************************************************************************************************************
+// *****************************************************************************************************************************
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use cosmwasm_std::{testing::{mock_dependencies, mock_env, mock_info}, coins, from_binary};
+    use cosmwasm_std::testing::{
+        mock_dependencies, mock_env, mock_info, MockQuerier, MOCK_CONTRACT_ADDR,
+    };
+    use cosmwasm_std::{
+        coins, Coin, CosmosMsg, Decimal, FullDelegation, OverflowError, OverflowOperation,
+        Validator,
+    };
+    use cw_controllers::Claim;
+    use cw_utils::{Duration, DAY, HOUR, WEEK};
 
-    const CREATOR: &str = "creator";
+    const MANAGER: &str = "manager";
+    const AGENT: &str = "agent";
+    const TREASURY: &str = "treasury";
+
+    const DELEGATOR1: &str = "bob";
+    const JANE: &str = "jane";
+    const BRUCE: &str = "bruce";
+
+    const VALIDATOR1: &str = "validator1";
+    const VALIDATOR2: &str = "validator2";
+    const VALIDATOR3: &str = "validator3";
+
+
+
+    fn sample_validator(addr: &str) -> Validator {
+        Validator {
+            address: addr.into(),
+            commission: Decimal::percent(3),
+            max_commission: Decimal::percent(10),
+            max_change_rate: Decimal::percent(1),
+        }
+    }
+
+    fn sample_delegation(val_addr: &str, amount: Coin) -> FullDelegation {
+        let can_redelegate = amount.clone();
+        let accumulated_rewards = coins(0, &amount.denom);
+        FullDelegation {
+            validator: val_addr.into(),
+            delegator: Addr::unchecked(MOCK_CONTRACT_ADDR),
+            amount,
+            can_redelegate,
+            accumulated_rewards,
+        }
+    }
+
+    fn set_validator(querier: &mut MockQuerier) {
+        querier.update_staking("ustake", &[sample_validator(VALIDATOR1)], &[]);
+    }
+
+    fn set_validators(querier: &mut MockQuerier) {
+        querier.update_staking("ustake", &[sample_validator(VALIDATOR1), sample_validator(VALIDATOR2), sample_validator(VALIDATOR3)], &[]);
+    }
+
+    fn set_delegation(querier: &mut MockQuerier, amount: u128, denom: &str) {
+        querier.update_staking(
+            "ustake",
+            &[sample_validator(VALIDATOR1)],
+            &[sample_delegation(VALIDATOR1, coin(amount, denom))],
+        );
+    }
+
+    // just a test helper, forgive the panic
+    fn later(env: &Env, delta: Duration) -> Env {
+        let time_delta = match delta {
+            Duration::Time(t) => t,
+            _ => panic!("Must provide duration in time"),
+        };
+        let mut res = env.clone();
+        res.block.time = res.block.time.plus_seconds(time_delta);
+        res
+    }
+
+    fn get_claims(deps: Deps, addr: &str) -> Vec<Claim> {
+        CLAIMS
+            .query_claims(deps, &Addr::unchecked(addr))
+            .unwrap()
+            .claims
+    }
+
+    fn default_instantiate(tax_percent: u64, min_withdrawal: u128) -> InstantiateMsg {
+        InstantiateMsg {
+            agent: AGENT.into(),
+            manager: MANAGER.into(),
+            treasury: TREASURY.into(),
+        }
+    }
 
     #[test]
     fn mint() {
         let mut deps = mock_dependencies();
         //let contract: Cw721Contract<Extension, Empty> = cw721_base::Cw721Contract::default();
 
-        let info = mock_info(CREATOR, &[]);
+        let info = mock_info(AGENT, &[]);
         // let init_msg = InstantiateMsg {
 
         // };
 //        entry::instantiate(deps.as_mut(), mock_env(), info.clone(), init_msg).unwrap();
-
- 
-
     }
 
 
