@@ -25,7 +25,7 @@ pub const NUMBER_VALIDATORS: Item<Uint64> = Item::new("number_validators");
 // Addresses
 pub const AGENT: Item<String> = Item::new("relayer");
 pub const MANAGER: Item<String> = Item::new("manager");
-pub const TREASURY: Item<String> = Item::new("manager");
+pub const TREASURY: Item<String> = Item::new("treasury");
 
 
 

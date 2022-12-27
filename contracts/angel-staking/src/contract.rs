@@ -64,48 +64,49 @@ pub fn execute(
 }
 
 pub fn execute_bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128) -> Result<Response, ContractError> {
-    let agent = AGENT.load(deps.storage)?;
-    if info.sender != agent {
-        return Err(ContractError::Unauthorized {});
-    }
-    // Making sure there is only one coin and handling the possible errors.
-    let d_coins = match one_coin(&info) {
-        Ok(coin) => coin,
-        Err(err) => {
-            match err {
-                PaymentError::NoFunds{} => {return Err(ContractError::NoFunds {  });}
-                PaymentError::MultipleDenoms{} => {return Err(ContractError::MultipleDenoms {  });}
-                _ => {return Err(ContractError::InvalidCoin {  });}
-            }
-        },
-    };
-    let amount = d_coins.amount;
+    // let agent = AGENT.load(deps.storage)?;
+    // if info.sender != agent {
+    //     return Err(ContractError::Unauthorized {});
+    // }
+    // // Making sure there is only one coin and handling the possible errors.
+    // let d_coins = match one_coin(&info) {
+    //     Ok(coin) => coin,
+    //     Err(err) => {
+    //         match err {
+    //             PaymentError::NoFunds{} => {return Err(ContractError::NoFunds {  });}
+    //             PaymentError::MultipleDenoms{} => {return Err(ContractError::MultipleDenoms {  });}
+    //             _ => {return Err(ContractError::InvalidCoin {  });}
+    //         }
+    //     },
+    // };
+    // let amount = d_coins.amount;
 
     let validator_address = chosen_validator(deps.as_ref(), None)?;
 
-    // Update bonded tokens to validator
-    let state = State::new();
-    let mut validator_info = state.validator.load(deps.storage, &validator_address)?;
-    validator_info.bonded.checked_add(amount.u128()).unwrap();
-    state.validator.save(deps.storage, &validator_address, &validator_info)?;
+    // // Update bonded tokens to validator
+    // let state = State::new();
+    // let mut validator_info = state.validator.load(deps.storage, &validator_address)?;
+    // validator_info.bonded.checked_add(amount.u128()).unwrap();
+    // state.validator.save(deps.storage, &validator_address, &validator_info)?;
 
-    BONDED.update(deps.storage, |total| -> StdResult<_> {
-            Ok(total.checked_add(amount)?)
-    })?;
+    // BONDED.update(deps.storage, |total| -> StdResult<_> {
+    //         Ok(total.checked_add(amount)?)
+    // })?;
 
-    TOTAL_BONDED.update(deps.storage, |total| -> StdResult<_> {
-        Ok(total.checked_add(amount)?)
-    })?;
+    // TOTAL_BONDED.update(deps.storage, |total| -> StdResult<_> {
+    //     Ok(total.checked_add(amount)?)
+    // })?;
 
-    let res = Response::new()
-        .add_message(StakingMsg::Delegate {
-            validator: validator_address.to_string(),
-            amount: d_coins,
-        })
-        .add_attribute("action", "bond")
-        .add_attribute("from", nft_id)
-        .add_attribute("bonded", amount)
-        .add_attribute("validator", validator_address);
+    let res = Response::new();
+    // let res = Response::new()
+    //     .add_message(StakingMsg::Delegate {
+    //         validator: validator_address.to_string(),
+    //         amount: d_coins,
+    //     })
+    //     .add_attribute("action", "bond")
+    //     .add_attribute("from", nft_id)
+    //     .add_attribute("bonded", amount)
+    //     .add_attribute("validator", validator_address);
     Ok(res)
 }
 
@@ -115,19 +116,24 @@ pub fn execute_bond(deps: DepsMut, _env: Env, info: MessageInfo, nft_id: Uint128
 pub fn chosen_validator (deps: Deps, excluded_address: Option<String>) -> Result<String, ContractError>  {
     let state = State::new();
     let validator_result : StdResult<Vec<_>>;
-    if excluded_address.is_none() {
+    // if excluded_address.is_none() {
+    //     validator_result = state.validator.idx.bonded
+    //     .range(deps.storage,None,None,Order::Ascending)
+    //     .take(1)
+    //     .collect();
+    // } else {
+    //     let excluded_address = excluded_address.unwrap();
+    //     validator_result = state.validator.idx.bonded
+    //     .range(deps.storage,None,None,Order::Ascending)
+    //     .filter(|item| item.as_ref().unwrap().0 != excluded_address)
+    //     .take(1)
+    //     .collect();
+    // }
+
         validator_result = state.validator.idx.bonded
         .range(deps.storage,None,None,Order::Ascending)
         .take(1)
         .collect();
-    } else {
-        let excluded_address = excluded_address.unwrap();
-        validator_result = state.validator.idx.bonded
-        .range(deps.storage,None,None,Order::Ascending)
-        .filter(|item| item.as_ref().unwrap().0 != excluded_address)
-        .take(1)
-        .collect();
-    }
 
     let vec_validator_address = validator_result?;
     let validator_address = &vec_validator_address[0].0;
@@ -342,6 +348,7 @@ pub fn execute_claim(deps: DepsMut, env: Env, info: MessageInfo, nft_id: Uint128
 
 pub fn execute_add_validator(deps: DepsMut, _env: Env, info: MessageInfo, validator_address: String, bond_denom: String, unbonding_period: Duration) -> Result<Response, ContractError> {
     let manager = MANAGER.load(deps.storage)?;
+
     if info.sender != manager {
         return Err(ContractError::Unauthorized {});
     }
@@ -578,7 +585,7 @@ mod tests {
     };
     use cosmwasm_std::{
         coins, Coin, CosmosMsg, Decimal, FullDelegation, OverflowError, OverflowOperation,
-        Validator,
+        Validator, from_binary, OwnedDeps,
     };
     use cw_controllers::Claim;
     use cw_utils::{Duration, DAY, HOUR, WEEK};
@@ -587,9 +594,9 @@ mod tests {
     const AGENT: &str = "agent";
     const TREASURY: &str = "treasury";
 
-    const DELEGATOR1: &str = "bob";
-    const JANE: &str = "jane";
-    const BRUCE: &str = "bruce";
+    const DELEGATOR1: &str = "contract";
+
+    const NFT_ID1 :u128 = 1u128;
 
     const VALIDATOR1: &str = "validator1";
     const VALIDATOR2: &str = "validator2";
@@ -652,25 +659,152 @@ mod tests {
             .claims
     }
 
-    fn default_instantiate(tax_percent: u64, min_withdrawal: u128) -> InstantiateMsg {
-        InstantiateMsg {
+     #[test]
+    fn add_missing_validator() {
+        let mut deps = mock_dependencies();
+        let info = mock_info(AGENT, &[]);
+        deps.querier
+            .update_staking("ustake", &[sample_validator(VALIDATOR1)], &[]);
+
+        let msg = InstantiateMsg {
             agent: AGENT.into(),
             manager: MANAGER.into(),
             treasury: TREASURY.into(),
-        }
+        };
+
+        instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::AddValidator { 
+            address: VALIDATOR2.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        let err = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::Unauthorized {  } 
+        );
+
+        let info = mock_info(MANAGER, &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::NotInValidatorSet {
+                validator: VALIDATOR2.into(),
+            }
+        );       
+
     }
 
     #[test]
-    fn mint() {
+    fn add_validators() {
         let mut deps = mock_dependencies();
-        //let contract: Cw721Contract<Extension, Empty> = cw721_base::Cw721Contract::default();
+        let info = mock_info(MANAGER, &[]);
+        deps.querier
+            .update_staking("ustake", &[sample_validator(VALIDATOR1),sample_validator(VALIDATOR2),sample_validator(VALIDATOR3)], &[]);
 
-        let info = mock_info(AGENT, &[]);
-        // let init_msg = InstantiateMsg {
+        let msg = InstantiateMsg {
+            agent: AGENT.into(),
+            manager: MANAGER.into(),
+            treasury: TREASURY.into(),
+        };
 
-        // };
-//        entry::instantiate(deps.as_mut(), mock_env(), info.clone(), init_msg).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::AddValidator { 
+            address: VALIDATOR1.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap();
+
+        let msg = ExecuteMsg::AddValidator { 
+            address: VALIDATOR2.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::AddValidator { 
+            address: VALIDATOR3.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[0], ("action", "add_validator"));
+        
+        let msg = QueryMsg::ValidatorInfo { address: VALIDATOR1.to_string() };
+        let res = query(deps.as_ref(), mock_env(), msg).unwrap();
+        let res : ValidatorInfo = from_binary(&res).unwrap();
+        assert_eq!(res, 
+            ValidatorInfo{ 
+                bond_denom: "ustake".to_string(), 
+                unbonding_period: WEEK, 
+                bonded: 0, 
+                claimed: 0 
+            }
+        );
     }
 
+    #[test]
+    fn add_validators_stake() {
+        let mut deps = mock_dependencies();
+        let info = mock_info(MANAGER, &[]);
+        deps.querier
+            .update_staking("ustake", &[sample_validator(VALIDATOR1),sample_validator(VALIDATOR2),sample_validator(VALIDATOR3)], &[]);
 
+        let msg = InstantiateMsg {
+            agent: AGENT.into(),
+            manager: MANAGER.into(),
+            treasury: TREASURY.into(),
+        };
+
+        instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let msg1 = ExecuteMsg::AddValidator { 
+            address: VALIDATOR1.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        let msg2 = ExecuteMsg::AddValidator { 
+            address: VALIDATOR2.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        let msg3 = ExecuteMsg::AddValidator { 
+            address: VALIDATOR3.to_string(), 
+            bond_denom: "ustake".to_string(), 
+            unbonding_period: WEEK 
+        };
+
+        execute(deps.as_mut(), mock_env(), info.clone(), msg1).unwrap();
+        execute(deps.as_mut(), mock_env(), info.clone(), msg2).unwrap();
+        execute(deps.as_mut(), mock_env(), info.clone(), msg3).unwrap();
+
+        let balance = coins(100, "ustake");
+        let info = mock_info(AGENT, &balance);  
+
+        let msg = ExecuteMsg::Bond { nft_id: Uint128::from(NFT_ID1) };
+
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[0], ("action", "bond"));
+
+        // let msg = QueryMsg::ValidatorInfo { address: VALIDATOR1.to_string() };
+        // let res = query(deps.as_ref(), mock_env(), msg).unwrap();
+        // let res : ValidatorInfo = from_binary(&res).unwrap();
+        // assert_eq!(res, 
+        //     ValidatorInfo{ 
+        //         bond_denom: "ustake".to_string(), 
+        //         unbonding_period: WEEK, 
+        //         bonded: 0, 
+        //         claimed: 0 
+        //     }
+        // );
+    }
 }
